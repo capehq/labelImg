@@ -11,6 +11,9 @@ import subprocess
 from functools import partial
 from collections import defaultdict
 
+from pydrive.auth import GoogleAuth
+from pydrive.drive import GoogleDrive
+
 try:
     from PyQt5.QtGui import *
     from PyQt5.QtCore import *
@@ -109,6 +112,16 @@ class MainWindow(QMainWindow, WindowMixin):
         self.dirname = None
         self.labelHist = []
         self.lastOpenDir = None
+
+        # CAPE Google Drive integration
+        self.useGoogleDrive = False
+        self.drive = None
+        self.googleDriveImagesDirectoryID = None
+        self.googleDriveLabelsDirectoryID = None
+        self.googleDrivePredictionsDirectoryID = None
+        self.driveImageList = []
+        self.drivePredictionList = []
+        self.driveLabelList = []
 
         # Whether we need to save or not.
         self.dirty = False
@@ -242,6 +255,9 @@ class MainWindow(QMainWindow, WindowMixin):
         opendir = action('&Open Dir', self.openDirDialog,
                          'Ctrl+u', 'open', u'Open Dir')
 
+        openGoogleDrive = action('&Open GoogleDrive', self.openGoogleDriveDialog,
+                         'Ctrl+g', 'open', u'Open Google Drive')
+
         changeSavedir = action('&Change Save Dir', self.changeSavedirDialog,
                                'Ctrl+r', 'open', u'Change default saved Annotation dir')
 
@@ -366,7 +382,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               fitWindow=fitWindow, fitWidth=fitWidth,
                               zoomActions=zoomActions,
                               fileMenuActions=(
-                                  open, opendir, openPred, save, saveAs, close, resetAll, quit),
+                                  open, opendir, openGoogleDrive, save, saveAs, close, resetAll, quit),
                               beginner=(), advanced=(),
                               editMenu=(edit, copy, delete,
                                         None, color1),
@@ -403,7 +419,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.paintLabelsOption.triggered.connect(self.togglePaintLabelsOption)
 
         addActions(self.menus.file,
-                   (open, opendir, openPred, changeSavedir, openAnnotation, self.menus.recentFiles, save, save_format, saveAs, close, resetAll, quit))
+                   (open, opendir, openGoogleDrive, openPred, changeSavedir, openAnnotation, self.menus.recentFiles, save, save_format, saveAs, close, resetAll, quit))
         addActions(self.menus.help, (help, showInfo))
         addActions(self.menus.view, (
             self.autoSaving,
@@ -424,11 +440,11 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.tools = self.toolbar('Tools')
         self.actions.beginner = (
-            open, opendir, openPred, changeSavedir, openNextImg, openPrevImg, verify, save, save_format, None, create, copy, delete, None,
+            open, opendir, openPred, openGoogleDrive, changeSavedir, openNextImg, openPrevImg, verify, save, save_format, None, create, copy, delete, None,
             zoomIn, zoom, zoomOut, fitWindow, fitWidth)
 
         self.actions.advanced = (
-            open, opendir, openPred, changeSavedir, openNextImg, openPrevImg, save, save_format, None,
+            open, opendir, openGoogleDrive, openPred, changeSavedir, openNextImg, openPrevImg, save, save_format, None,
             createMode, editMode, None,
             hideAll, showAll)
 
@@ -438,6 +454,7 @@ class MainWindow(QMainWindow, WindowMixin):
         # Application state.
         self.image = QImage()
         self.filePath = ustr(defaultFilename)
+        self.currentImageIndex = 0
         self.recentFiles = []
         self.maxRecent = 7
         self.lineColor = None
@@ -1076,7 +1093,8 @@ class MainWindow(QMainWindow, WindowMixin):
         # Tzutalin 20160906 : Add file list and dock to move faster
         # Highlight the file item
         if unicodeFilePath and self.fileListWidget.count() > 0:
-            index = self.mImgList.index(unicodeFilePath)
+            #index = self.mImgList.index(unicodeFilePath)  # with google drive we cannot rely on this
+            index = self.currentImageIndex
             fileWidgetItem = self.fileListWidget.item(index)
             fileWidgetItem.setSelected(True)
 
@@ -1123,19 +1141,26 @@ class MainWindow(QMainWindow, WindowMixin):
 
             # Label xml file and show bound box according to its filename
             # if self.usingPascalVocFormat is True:
-            if self.defaultSaveDir is not None:
-                basename = os.path.basename(
-                    os.path.splitext(self.filePath)[0])
-                xmlPath = os.path.join(self.defaultSaveDir, basename + XML_EXT)
-                txtPath = os.path.join(self.defaultSaveDir, basename + TXT_EXT)
+            if self.defaultSaveDir is not None or self.useGoogleDrive:
+                if self.useGoogleDrive:
+                    # download file if needed.
+                    labelFile = self.driveFileLookup(os.path.split(filePath)[1])
+                    xmlPath = self.downloadGoogleDriveFile(labelFile)
+                    txtPath = None
+                else:
+                    basename = os.path.basename(
+                        os.path.splitext(self.filePath)[0])
+                    xmlPath = os.path.join(self.defaultSaveDir, basename + XML_EXT)
+                    txtPath = os.path.join(self.defaultSaveDir, basename + TXT_EXT)
 
                 """Annotation file priority:
                 PascalXML > YOLO
                 """
-                if os.path.isfile(xmlPath):
-                    self.loadPascalXMLByFilename(xmlPath)
-                elif os.path.isfile(txtPath):
-                    self.loadYOLOTXTByFilename(txtPath)
+                if xmlPath is not None:
+                    if os.path.isfile(xmlPath):
+                        self.loadPascalXMLByFilename(xmlPath)
+                    elif os.path.isfile(txtPath):
+                        self.loadYOLOTXTByFilename(txtPath)
             else:
                 xmlPath = os.path.splitext(filePath)[0] + XML_EXT
                 txtPath = os.path.splitext(filePath)[0] + TXT_EXT
@@ -1144,9 +1169,14 @@ class MainWindow(QMainWindow, WindowMixin):
                 elif os.path.isfile(txtPath):
                     self.loadYOLOTXTByFilename(txtPath)
 
-            if self.defaultPredictionDir:
-                basename = os.path.basename(os.path.splitext(self.filePath)[0])
-                xmlPath = os.path.join(self.defaultPredictionDir, basename + XML_EXT)
+            if self.defaultPredictionDir is not None or self.useGoogleDrive:  # CAPE load predicted labels
+                if self.useGoogleDrive:
+                    # download file if needed.
+                    predFile = self.driveFileLookup(os.path.split(filePath)[1], prediction=True)
+                    xmlPath = self.downloadGoogleDriveFile(predFile, prediction=True)
+                else:
+                    basename = os.path.basename(os.path.splitext(self.filePath)[0])
+                    xmlPath = os.path.join(self.defaultPredictionDir, basename + XML_EXT)
 
                 if xmlPath is not None:
                     if os.path.isfile(xmlPath):
@@ -1237,16 +1267,22 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.mayContinue():
             self.loadFile(filename)
 
-    def scanAllImages(self, folderPath):
+    def scanAllImages(self, folderPath=None):
         extensions = ['.%s' % fmt.data().decode("ascii").lower() for fmt in QImageReader.supportedImageFormats()]
         images = []
 
-        for root, dirs, files in os.walk(folderPath):
-            for file in files:
-                if file.lower().endswith(tuple(extensions)):
-                    relativePath = os.path.join(root, file)
-                    path = ustr(os.path.abspath(relativePath))
-                    images.append(path)
+        if self.useGoogleDrive:
+            for fileList in self.drive.ListFile({'q': "'{}' in parents".format(self.googleDriveImagesDirectoryID)}):
+                for imageFile in fileList:
+                    if imageFile['title'].lower().endswith(tuple(extensions)):
+                        images.append(imageFile['title'])
+        else:
+            for root, dirs, files in os.walk(folderPath):
+                for file in files:
+                   if file.lower().endswith(tuple(extensions)):
+                        relativePath = os.path.join(root, file)
+                        path = ustr(os.path.abspath(relativePath))
+                        images.append(path)
         images.sort(key=lambda x: x.lower())
         return images
 
@@ -1338,6 +1374,126 @@ class MainWindow(QMainWindow, WindowMixin):
             item = QListWidgetItem(imgPath)
             self.fileListWidget.addItem(item)
 
+    def driveFileLookup(self, imgName, prediction=False):
+        # find label or prediction file for image
+        if imgName.endswith('.jpg'):
+            imgName = imgName[:-4]
+        labelFileName = '{}.xml'.format(imgName)
+
+        fileList = self.drivePredictionList if prediction else self.driveLabelList
+
+        for labelFile in fileList:
+            if labelFile['title'] == labelFileName:
+                return labelFile
+        return None
+
+    def openGoogleDriveDialog(self, _value=False, dirpath=None):
+
+        # do we have the client_secrets.json?
+        secrets_path = os.path.join(os.getcwd(), 'client_secrets.json')
+        if not os.path.isfile(secrets_path):
+            msg = QMessageBox()
+            msg.setText("Missing \'client_secrets.json\', Google Drive Authentication failed.")
+            ret = msg.exec_()
+            return
+
+        self.useGoogleDrive = True
+        self.defaultSaveDir = './temp'
+        self.importGoogleDriveImages()
+
+    def importGoogleDriveImages(self):
+        if not self.mayContinue():
+            return
+
+        self.connectGoogleDrive()
+
+        self.fileListWidget.clear()
+        self.mImgList = self.scanAllImages()
+
+        self.openNextImg()
+
+        for imgPath in self.mImgList:
+            item = QListWidgetItem(imgPath)
+            self.fileListWidget.addItem(item)
+
+    def getFolderIdFromUser(self):
+        default = '<Google Drive ID>'
+        text, ok = QInputDialog.getText(self, 'Google Drive Directory ID',
+            'Enter dataset directory Google Drive ID:',
+            text=default)
+
+        return text if ok else default
+
+    def getDriveItemId(self, itemName, parentId=None):
+        if parentId is None:
+            parent_id = self.driveRootFolder  # root dataset folder
+        for fileList in self.drive.ListFile({'q': "'{}' in parents".format(parentId)}):
+            for elem in fileList:
+                if elem['title'] == itemName:
+                    return elem['id']
+
+        return None
+
+    def getDriveFileList(self, parentId):
+        files = []
+        for fileList in self.drive.ListFile({'q': "'{}' in parents".format(parentId)}):
+            for driveFile in fileList:
+                files.append(driveFile)
+        files.sort(key=lambda x: x['title'].lower())
+        return files
+
+    def connectGoogleDrive(self):
+
+        # authenticate
+        gauth = GoogleAuth()
+        gauth.LocalWebserverAuth()
+
+        # get directories
+        self.drive = GoogleDrive(gauth)
+        self.driveRootFolder = self.getFolderIdFromUser()
+
+        self.googleDriveImagesDirectoryID = self.getDriveItemId('images', self.driveRootFolder)
+        self.googleDriveLabelsDirectoryID = self.getDriveItemId('labels', self.driveRootFolder)
+        self.googleDrivePredictionsDirectoryID = self.getDriveItemId('predictions', self.driveRootFolder)
+
+        self.driveImageList = self.getDriveFileList(self.googleDriveImagesDirectoryID)
+        self.driveLabelList = self.getDriveFileList(self.googleDriveLabelsDirectoryID)
+        self.drivePredictionList = self.getDriveFileList(self.googleDrivePredictionsDirectoryID)
+
+    def downloadGoogleDriveFile(self, driveFile, prediction=False):
+        if driveFile is None:
+            return None
+        saveDir = './temp/prediction' if prediction else './temp'
+        if not os.path.exists(saveDir):
+            os.makedirs(saveDir)
+        path = os.path.join(os.getcwd(), saveDir, driveFile['title'])
+        if not os.path.exists(path):
+            driveFile.FetchContent()
+            driveFile.GetContentFile(os.path.join(saveDir, driveFile['title']))
+        return path
+
+    def uploadGoogleDrive(self, filePath, fileName, parentId=None):
+
+        if parentId is None:
+            parentId = self.googleDriveLabelsDirectoryID
+
+        # check if we have this label file already
+        fileForUpload = None
+        for fileList in self.drive.ListFile({'q': "'{}' in parents".format(parentId)}):
+            for labelFile in fileList:
+                if labelFile['title'] == fileName:
+                    fileForUpload = labelFile
+        
+        if fileForUpload is None:
+            fileForUpload = self.drive.CreateFile({'title': fileName,
+                'parents': [{'kind': 'drive#fileLink', 'id': parentId}]})
+
+        self.driveLabelList.append(fileForUpload)
+
+        fileForUpload.SetContentFile(filePath)
+        fileForUpload.Upload()
+        return
+
     def verifyImg(self, _value=False):
         # Proceding next image without dialog if having any label
          if self.filePath is not None:
@@ -1372,11 +1528,20 @@ class MainWindow(QMainWindow, WindowMixin):
         if self.filePath is None:
             return
 
-        currIndex = self.mImgList.index(self.filePath)
-        if currIndex - 1 >= 0:
-            filename = self.mImgList[currIndex - 1]
-            if filename:
-                self.loadFile(filename)
+        filename = None
+        if self.filePath is not None:
+            if self.currentImageIndex - 1 < 0:
+                return
+            else:
+                self.currentImageIndex -= 1
+
+        if self.useGoogleDrive:
+            filename = self.downloadGoogleDriveFile(self.driveImageList[self.currentImageIndex])
+        else:
+            filename = self.mImgList[self.currentImageIndex]
+
+        if filename:
+            self.loadFile(filename)
 
     def openNextImg(self, _value=False):
         # Proceding prev image without dialog if having any label
@@ -1395,12 +1560,17 @@ class MainWindow(QMainWindow, WindowMixin):
             return
 
         filename = None
-        if self.filePath is None:
-            filename = self.mImgList[0]
+        if self.filePath is not None:
+            if self.currentImageIndex + 1 >= len(self.mImgList):
+                return None
+            else:
+                self.currentImageIndex += 1
+
+        if self.useGoogleDrive:
+            filename = self.downloadGoogleDriveFile(self.driveImageList[self.currentImageIndex])
+            self.filePath = filename
         else:
-            currIndex = self.mImgList.index(self.filePath)
-            if currIndex + 1 < len(self.mImgList):
-                filename = self.mImgList[currIndex + 1]
+            filename = self.mImgList[self.currentImageIndex]
 
         if filename:
             self.loadFile(filename)
@@ -1424,6 +1594,9 @@ class MainWindow(QMainWindow, WindowMixin):
                 savedFileName = os.path.splitext(imgFileName)[0]
                 savedPath = os.path.join(ustr(self.defaultSaveDir), savedFileName)
                 self._saveFile(savedPath)
+                if self.useGoogleDrive:
+                    savedFilePath = os.path.splitext(self.filePath)[0] + '.xml'
+                    self.uploadGoogleDrive(savedFilePath, savedFileName + '.xml')
         else:
             imgFileDir = os.path.dirname(self.filePath)
             imgFileName = os.path.basename(self.filePath)

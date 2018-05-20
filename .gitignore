@@ -17,3 +17,5 @@ cscope*
 .subvimrc
 .vscode
 *.pkl
+client_secrets.json
+temp/
