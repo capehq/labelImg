@@ -103,6 +103,17 @@ in your /Applications folder. You can consider this script: build-tools/build-fo
     python setup.py py2app -A
     mv "dist/labelImg.app" /Applications
 
+**CAPE** Python 3 Virtualenv + Binary  
+.. code::
+    
+    
+    virtualenv -p python3 <virtualenv name>
+    source <virtualenv name>/bin/activate
+    pip3 install py2app
+    pip3 install PyQt5 lxml pydrive
+    make qt5py3
+    python3 labelImg.py
+
 Windows
 ^^^^^^^
 
