@@ -37,13 +37,19 @@ class Shape(object):
     point_size = 8
     scale = 1.0
 
-    def __init__(self, label=None, line_color=None, difficult=False, paintLabel=False):
-        self.label = label
+    def __init__(self, label=None, line_color=None, difficult=False, paintLabel=False, prediction=False, score=1.0):
+        if prediction:
+            # show confidence value in label 
+            self.label = 'P: ' + '{:02d}% '.format(int(score*100)) + label 
+        else:
+            self.label = label
         self.points = []
         self.fill = False
         self.selected = False
         self.difficult = difficult
         self.paintLabel = paintLabel
+        self.prediction = prediction
+        self.score = score
 
         self._highlightIndex = None
         self._highlightMode = self.NEAR_VERTEX

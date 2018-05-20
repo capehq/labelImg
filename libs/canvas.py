@@ -10,7 +10,7 @@ except ImportError:
 #from PyQt4.QtOpenGL import *
 
 from libs.shape import Shape
-from libs.lib import distance
+from libs.lib import distance, generateColorByText
 
 CURSOR_DEFAULT = Qt.ArrowCursor
 CURSOR_POINT = Qt.PointingHandCursor
@@ -38,6 +38,7 @@ class Canvas(QWidget):
         # Initialise local state.
         self.mode = self.EDIT
         self.shapes = []
+        self.predictionShapes = []  # CAPE
         self.current = None
         self.selectedShape = None  # save the selected shape here
         self.selectedShapeCopy = None
@@ -283,6 +284,18 @@ class Canvas(QWidget):
         if self.canCloseShape() and len(self.current) > 3:
             self.current.popPoint()
             self.finalise()
+
+        pos = self.transformPos(ev.pos())
+        self.selectShapePoint(pos)
+        shape = self.selectedShape
+        if shape.prediction:  # accept prediction as label
+            shape.label = shape.label[7:]  # remove "P: dd% "prefix
+            shape.prediction = False
+            shape.score = 1.0
+            shape.line_color = generateColorByText(shape.label)
+            shape.fill_color = generateColorByText(shape.label)
+            self.selectShape(shape)  # re-select shape just to emit
+            self.update()
 
     def selectShape(self, shape):
         self.deSelectShape()
@@ -650,7 +663,12 @@ class Canvas(QWidget):
         self.repaint()
 
     def loadShapes(self, shapes):
-        self.shapes = list(shapes)
+        self.shapes += list(shapes)
+        self.current = None
+        self.repaint()
+
+    def loadPredictionShapes(self, shapes):  # CAPE
+        self.predictionShapes = list(shapes) # DEBUG: overwriting issue?
         self.current = None
         self.repaint()
 

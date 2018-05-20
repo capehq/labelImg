@@ -75,6 +75,10 @@ def fmtShortcut(text):
 
 
 def generateColorByText(text):
+    if text[:2] == 'P:':
+        # CAPE: make prediction labels always red
+        return QColor(255, 0, 0, 220)
+
     s = str(ustr(text))
     hashCode = int(hashlib.sha256(s.encode('utf-8')).hexdigest(), 16)
     r = int((hashCode / 255) % 255)

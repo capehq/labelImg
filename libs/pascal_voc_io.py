@@ -129,7 +129,7 @@ class PascalVocReader:
 
     def __init__(self, filepath):
         # shapes type:
-        # [labbel, [(x1,y1), (x2,y2), (x3,y3), (x4,y4)], color, color, difficult]
+        # [labbel, [(x1,y1), (x2,y2), (x3,y3), (x4,y4)], color, color, difficult, prediction, score]
         self.shapes = []
         self.filepath = filepath
         self.verified = False
@@ -141,13 +141,13 @@ class PascalVocReader:
     def getShapes(self):
         return self.shapes
 
-    def addShape(self, label, bndbox, difficult):
+    def addShape(self, label, bndbox, difficult, score):
         xmin = int(bndbox.find('xmin').text)
         ymin = int(bndbox.find('ymin').text)
         xmax = int(bndbox.find('xmax').text)
         ymax = int(bndbox.find('ymax').text)
         points = [(xmin, ymin), (xmax, ymin), (xmax, ymax), (xmin, ymax)]
-        self.shapes.append((label, points, None, None, difficult))
+        self.shapes.append((label, points, None, None, difficult, score))
 
     def parseXML(self):
         assert self.filepath.endswith(XML_EXT), "Unsupport file format"
@@ -166,7 +166,10 @@ class PascalVocReader:
             label = object_iter.find('name').text
             # Add chris
             difficult = False
+            score = 100
             if object_iter.find('difficult') is not None:
                 difficult = bool(int(object_iter.find('difficult').text))
-            self.addShape(label, bndbox, difficult)
+            if object_iter.find('score') is not None:
+                score = int(object_iter.find('score').text)
+            self.addShape(label, bndbox, difficult, float(score)/100.0)
         return True

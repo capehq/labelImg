@@ -100,6 +100,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         # Save as Pascal voc xml
         self.defaultSaveDir = defaultSaveDir
+        self.defaultPredictionDir = None
         self.usingPascalVocFormat = True
         self.usingYoloFormat = False
 
@@ -140,6 +141,24 @@ class MainWindow(QMainWindow, WindowMixin):
         useDefaultLabelContainer = QWidget()
         useDefaultLabelContainer.setLayout(useDefaultLabelQHBoxLayout)
 
+        # CAPE: show predicted labels
+        self.showPredictedLabelCheckbox = QCheckBox(u'Show predicted labels')
+        self.showPredictedLabelCheckbox.setChecked(True)
+        self.showPredictedLabelCheckbox.stateChanged.connect(self.togglePredictions)
+
+        # CAPE: prediction confidence threshold
+        self.predictionThresholdLabel = QLabel()
+        self.predictionThresholdValue = QLabel()
+        self.predictionThresholdLabel.setText('Prediction confidence threshold')
+        self.predictionThresholdValue.setText('0%')
+        self.predictionThresholdSlider = QSlider(Qt.Horizontal)
+        self.predictionThresholdSlider.setRange(0, 100)
+        self.predictionThresholdSlider.setSingleStep(1)
+        self.predictionThresholdSlider.valueChanged.connect(self.predictionThresholdChanged)
+        thresholdSubLayout = QHBoxLayout()
+        thresholdSubLayout.addWidget(self.predictionThresholdLabel)
+        thresholdSubLayout.addWidget(self.predictionThresholdValue)
+
         # Create a widget for edit and diffc button
         self.diffcButton = QCheckBox(u'difficult')
         self.diffcButton.setChecked(False)
@@ -150,6 +169,9 @@ class MainWindow(QMainWindow, WindowMixin):
         # Add some of widgets to listLayout
         listLayout.addWidget(self.editButton)
         listLayout.addWidget(self.diffcButton)
+        listLayout.addWidget(self.showPredictedLabelCheckbox)  # CAPE
+        listLayout.addLayout(thresholdSubLayout)  # CAPE
+        listLayout.addWidget(self.predictionThresholdSlider)  # CAPE
         listLayout.addWidget(useDefaultLabelContainer)
 
         # Create and add a widget for showing current label items
@@ -225,6 +247,9 @@ class MainWindow(QMainWindow, WindowMixin):
 
         openAnnotation = action('&Open Annotation', self.openAnnotationDialog,
                                 'Ctrl+Shift+O', 'open', u'Open Annotation')
+
+        openPred = action('&Load Predictions', self.openPredDialog,    # CAPE
+                         'Ctrl+p', 'open', u'Selecting directory to load predictions from.')
 
         openNextImg = action('&Next Image', self.openNextImg,
                              'd', 'next', u'Open Next')
@@ -341,7 +366,7 @@ class MainWindow(QMainWindow, WindowMixin):
                               fitWindow=fitWindow, fitWidth=fitWidth,
                               zoomActions=zoomActions,
                               fileMenuActions=(
-                                  open, opendir, save, saveAs, close, resetAll, quit),
+                                  open, opendir, openPred, save, saveAs, close, resetAll, quit),
                               beginner=(), advanced=(),
                               editMenu=(edit, copy, delete,
                                         None, color1),
@@ -378,7 +403,7 @@ class MainWindow(QMainWindow, WindowMixin):
         self.paintLabelsOption.triggered.connect(self.togglePaintLabelsOption)
 
         addActions(self.menus.file,
-                   (open, opendir, changeSavedir, openAnnotation, self.menus.recentFiles, save, save_format, saveAs, close, resetAll, quit))
+                   (open, opendir, openPred, changeSavedir, openAnnotation, self.menus.recentFiles, save, save_format, saveAs, close, resetAll, quit))
         addActions(self.menus.help, (help, showInfo))
         addActions(self.menus.view, (
             self.autoSaving,
@@ -399,11 +424,11 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.tools = self.toolbar('Tools')
         self.actions.beginner = (
-            open, opendir, changeSavedir, openNextImg, openPrevImg, verify, save, save_format, None, create, copy, delete, None,
+            open, opendir, openPred, changeSavedir, openNextImg, openPrevImg, verify, save, save_format, None, create, copy, delete, None,
             zoomIn, zoom, zoomOut, fitWindow, fitWidth)
 
         self.actions.advanced = (
-            open, opendir, changeSavedir, openNextImg, openPrevImg, save, save_format, None,
+            open, opendir, openPred, changeSavedir, openNextImg, openPrevImg, save, save_format, None,
             createMode, editMode, None,
             hideAll, showAll)
 
@@ -664,6 +689,12 @@ class MainWindow(QMainWindow, WindowMixin):
             item.setBackground(generateColorByText(text))
             self.setDirty()
 
+    def changeLabel(self, item, newLabel):
+        if newLabel is not None:
+            item.setText(newLabel)
+            item.setBackground(generateColorByText(newLabel))
+            self.setDirty()
+
     # Tzutalin 20160906 : Add file list and dock to move faster
     def fileitemDoubleClicked(self, item=None):
         currIndex = self.mImgList.index(ustr(item.text()))
@@ -706,7 +737,10 @@ class MainWindow(QMainWindow, WindowMixin):
         else:
             shape = self.canvas.selectedShape
             if shape:
-                self.shapesToItems[shape].setSelected(True)
+                item = self.shapesToItems[shape]
+                item.setSelected(True)
+                if shape.label != item.text():  # CAPE:  we accepted prediction with double click
+                    self.changeLabel(item, shape.label)
             else:
                 self.labelList.clearSelection()
         self.actions.delete.setEnabled(selected)
@@ -736,29 +770,82 @@ class MainWindow(QMainWindow, WindowMixin):
         del self.shapesToItems[shape]
         del self.itemsToShapes[item]
 
-    def loadLabels(self, shapes):
+    def loadLabels(self, shapes, prediction=False):
         s = []
-        for label, points, line_color, fill_color, difficult in shapes:
-            shape = Shape(label=label)
+        for label, points, line_color, fill_color, difficult, score in shapes:
+            if prediction:
+                shape = Shape(label=label, prediction=prediction, score=score)
+            else:
+                shape = Shape(label=label)
+                
             for x, y in points:
                 shape.addPoint(QPointF(x, y))
             shape.difficult = difficult
+            shape.prediction = prediction
             shape.close()
-            s.append(shape)
 
-            if line_color:
-                shape.line_color = QColor(*line_color)
-            else:
-                shape.line_color = generateColorByText(label)
+            # check IoU
+            if not self.significantOverlap(shape):
+                s.append(shape)
 
-            if fill_color:
-                shape.fill_color = QColor(*fill_color)
-            else:
-                shape.fill_color = generateColorByText(label)
+                if line_color:
+                    shape.line_color = QColor(*line_color)
+                else:
+                    shape.line_color = generateColorByText(shape.label)
 
-            self.addLabel(shape)
+                if fill_color:
+                    shape.fill_color = QColor(*fill_color)
+                else:
+                    shape.fill_color = generateColorByText(shape.label)
+
+                self.addLabel(shape)
 
         self.canvas.loadShapes(s)
+
+    def significantOverlap(self, new_shape):
+        # Checking "Intersectover Union" with all existing shape,
+        # reject prediction if IoU over threshold found
+        thresholdIoU = 0.7
+        maxIoU = 0
+        for item, shape in self.itemsToShapes.items():
+            if not shape.prediction:
+                IoU = self.calculateIoU(shape, new_shape)
+                if maxIoU < IoU: maxIoU = IoU
+
+        return maxIoU > thresholdIoU
+
+    def calculateIoU(self, shapeA, shapeB):
+
+        xminA, yminA, xmaxA, ymaxA = self.getRectSides(shapeA)
+        xminB, yminB, xmaxB, ymaxB = self.getRectSides(shapeB)
+
+        xIntersect = min(xmaxA, xmaxB) - max(xminA, xminB)
+        yIntersect = min(ymaxA, ymaxB) - max(yminA, yminB)
+
+        if xIntersect<0 or yIntersect<0:
+            return 0
+        else:
+            intersect = xIntersect * yIntersect
+
+        areaA = (xmaxA-xminA) * (ymaxA-yminA)
+        areaB = (xmaxB-xminB) * (ymaxB-yminB)
+
+        IoU = intersect / (areaA + areaB - intersect)
+
+        return IoU
+
+    def getRectSides(self, shape):
+
+        xmin = ymin = sys.maxsize
+        xmax = ymax = 0
+
+        for point in shape.points:   # QPointF 
+            if xmin > point.x(): xmin = point.x()
+            if xmax < point.x(): xmax = point.x()
+            if ymin > point.y(): ymin = point.y()
+            if ymax < point.y(): ymax = point.y()
+
+        return xmin, ymin, xmax, ymax
 
     def saveLabels(self, annotationFilePath):
         annotationFilePath = ustr(annotationFilePath)
@@ -774,7 +861,8 @@ class MainWindow(QMainWindow, WindowMixin):
                        # add chris
                         difficult = s.difficult)
 
-        shapes = [format_shape(shape) for shape in self.canvas.shapes]
+        shapes = [format_shape(shape) for shape in self.canvas.shapes if not shape.prediction]  # CAPE: save only labels, not predictions
+
         # Can add differrent annotation formats here
         try:
             if self.usingPascalVocFormat is True:
@@ -817,6 +905,7 @@ class MainWindow(QMainWindow, WindowMixin):
         if label != shape.label:
             shape.label = item.text()
             shape.line_color = generateColorByText(shape.label)
+            shape.fill_color = generateColorByText(shape.label)
             self.setDirty()
         else:  # User probably changed item visibility
             self.canvas.setShapeVisible(shape, item.checkState() == Qt.Checked)
@@ -943,6 +1032,36 @@ class MainWindow(QMainWindow, WindowMixin):
         for item, shape in self.itemsToShapes.items():
             item.setCheckState(Qt.Checked if value else Qt.Unchecked)
 
+    def togglePredictions(self):
+        for item, shape in self.itemsToShapes.items():
+            if shape.prediction:
+                item.setCheckState(self.showPredictedLabelCheckbox.checkState())
+
+        if self.showPredictedLabelCheckbox.checkState() == Qt.Checked:
+            self.predictionThresholdSlider.setValue(0)
+        elif self.showPredictedLabelCheckbox.checkState() == Qt.Unchecked:
+            self.predictionThresholdSlider.setValue(100)
+
+    def predictionThresholdChanged(self, value):
+        # uncheck predictions under a certain threshold
+
+        threshold = float(value)/100.0
+        self.predictionThresholdValue.setText(str(value) + '%')
+
+        if value == 100:
+            self.showPredictedLabelCheckbox.setCheckState(Qt.Unchecked)
+        elif value == 0:
+            self.showPredictedLabelCheckbox.setCheckState(Qt.Checked)
+        else:
+            self.showPredictedLabelCheckbox.setCheckState(Qt.PartiallyChecked)
+
+        for item, shape in self.itemsToShapes.items():
+            if shape.prediction:
+                if shape.score < threshold:
+                    item.setCheckState(Qt.Unchecked)
+                else:
+                    item.setCheckState(Qt.Checked)                
+
     def loadFile(self, filePath=None):
         """Load the specified file, or the last opened file if None."""
         self.resetState()
@@ -1025,7 +1144,19 @@ class MainWindow(QMainWindow, WindowMixin):
                 elif os.path.isfile(txtPath):
                     self.loadYOLOTXTByFilename(txtPath)
 
+            if self.defaultPredictionDir:
+                basename = os.path.basename(os.path.splitext(self.filePath)[0])
+                xmlPath = os.path.join(self.defaultPredictionDir, basename + XML_EXT)
+
+                if xmlPath is not None:
+                    if os.path.isfile(xmlPath):
+                        self.loadPredictionXMLByFilename(xmlPath)
+
             self.setWindowTitle(__appname__ + ' ' + filePath)
+
+            # CAPE toggle prediction visibility
+            self.togglePredictions()
+            self.predictionThresholdChanged(self.predictionThresholdSlider.value())
 
             # Default : select last item if there is at least one item
             if self.labelList.count():
@@ -1151,6 +1282,32 @@ class MainWindow(QMainWindow, WindowMixin):
                 if isinstance(filename, (tuple, list)):
                     filename = filename[0]
             self.loadPascalXMLByFilename(filename)
+
+    def openPredDialog(self,  _value=False):  # CAPE
+        if self.filePath is None:
+            self.statusBar().showMessage('Please select image first')
+            self.statusBar().show()
+            return
+
+        path = os.path.dirname(os.path.dirname(self.filePath))
+        dirpath = ustr(QFileDialog.getExistingDirectory(self,
+                                                       '%s - Load label predicted label candidates from directory ' % __appname__, path,  QFileDialog.ShowDirsOnly
+                                                       | QFileDialog.DontResolveSymlinks))
+
+        if dirpath is not None:
+            self.defaultPredictionDir = dirpath
+
+        self.statusBar().showMessage('Predictions will be loaded from %s' %
+                                     (self.defaultPredictionDir))
+        self.statusBar().show()
+
+        # load predictions for the current image
+        basename = os.path.basename(
+                    os.path.splitext(self.filePath)[0])
+        xmlPath = os.path.join(self.defaultPredictionDir, basename + XML_EXT)
+
+        if os.path.isfile(xmlPath):
+            self.loadPredictionXMLByFilename(xmlPath)
 
     def openDirDialog(self, _value=False, dirpath=None):
         if not self.mayContinue():
@@ -1394,6 +1551,19 @@ class MainWindow(QMainWindow, WindowMixin):
         shapes = tVocParseReader.getShapes()
         self.loadLabels(shapes)
         self.canvas.verified = tVocParseReader.verified
+
+    def loadPredictionXMLByFilename(self, xmlPath):    
+        if self.filePath is None:
+            return
+        if os.path.isfile(xmlPath) is False:
+            return
+
+        self.set_format("PascalVOC")
+
+        tVocParseReader = PascalVocReader(xmlPath)
+        shapes = tVocParseReader.getShapes()
+        self.loadLabels(shapes, prediction=True)
+        # self.canvas.verified = tVocParseReader.verified
 
     def loadYOLOTXTByFilename(self, txtPath):
         if self.filePath is None:
