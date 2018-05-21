@@ -25,6 +25,36 @@ by `ImageNet <http://www.image-net.org/>`__.
 Installation
 ------------------
 
+CAPE setup 
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Python3 + Virtualenv
+
+First, you will need a Python virtual environment. I tested labelImg with `virtualenv <https://virtualenv.readthedocs.io/en/stable/>`__, but most probably other virtual environment managers (venv, pyenv, conda env, virtualenvwrapper, etc.) would work just as well. Install virtualenv if you don't have any other python virtual environment manager already:
+
+.. code::
+
+    pip install virtualenv
+
+To use Google Drive API, we need the `client_secrets.json` file for authentication. You can just copy it from your ml-dataset-tools clone, if you've set that up already, or follow the OAuth setup steps `here <https://github.com/capehq/ml-dataset-tools/blob/master/README.md>`__.
+
+.. code::
+    
+    virtualenv -p python3 <virtualenv name>
+    source <virtualenv name>/bin/activate
+    pip3 install PyQt5 lxml pydrive
+    make qt5py3
+    python3 labelImg.py
+    
+Click 'Connect Google Drive' and enter your dataset directory ID to start working on a dataset created with ml-dataset-tools. It will load the images, and corresponding labels and predicted labels, if there is any. Saving will directly upload your changes to Google Drive.
+    
+When you finish working with labelImage, deactivate your virtual environment
+
+.. code::
+    
+    deactivate
+
+
 Download prebuilt binaries
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -103,16 +133,6 @@ in your /Applications folder. You can consider this script: build-tools/build-fo
     python setup.py py2app -A
     mv "dist/labelImg.app" /Applications
 
-**CAPE** Python 3 Virtualenv + Binary  
-.. code::
-    
-    
-    virtualenv -p python3 <virtualenv name>
-    source <virtualenv name>/bin/activate
-    pip3 install py2app
-    pip3 install PyQt5 lxml pydrive
-    make qt5py3
-    python3 labelImg.py
 
 Windows
 ^^^^^^^
