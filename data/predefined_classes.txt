@@ -1,15 +1,14 @@
-dog
-person
-cat
-tv
 car
-meatballs
-marinara sauce
-tomato soup
-chicken noodle soup
-french onion soup
-chicken breast
-ribs
-pulled pork
-hamburger
-cavity
+pickup
+van
+bus
+truck
+trailer
+person
+bicycle
+motorcycle
+police car
+police officer
+police truck
+fire truck
+firefighter
