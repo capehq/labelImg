@@ -13,6 +13,7 @@ from collections import defaultdict
 
 from pydrive.auth import GoogleAuth
 from pydrive.drive import GoogleDrive
+from pydrive import files
 
 try:
     from PyQt5.QtGui import *
@@ -1596,7 +1597,12 @@ class MainWindow(QMainWindow, WindowMixin):
                 self._saveFile(savedPath)
                 if self.useGoogleDrive:
                     savedFilePath = os.path.splitext(self.filePath)[0] + '.xml'
-                    self.uploadGoogleDrive(savedFilePath, savedFileName + '.xml')
+                    try:
+                        self.uploadGoogleDrive(savedFilePath, savedFileName + '.xml')
+                    except files.ApiRequestError:
+                        msg = QMessageBox()
+                        msg.setText("You don't have write access to the loaded Google Drive folder.")
+                        ret = msg.exec_()
         else:
             imgFileDir = os.path.dirname(self.filePath)
             imgFileName = os.path.basename(self.filePath)
