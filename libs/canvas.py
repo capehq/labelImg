@@ -332,7 +332,16 @@ class Canvas(QWidget):
         index, shape = self.hVertex, self.hShape
         point = shape[index]
         if self.outOfPixmap(pos):
-            pos = self.intersectionPoint(point, pos)
+            try:
+                pos = self.intersectionPoint(point, pos)
+            except ValueError:
+                # ugly solution but does the job.
+                print('Out of canvas shape encountered, replacing shape to the canvas.')
+                shape[0] = QPointF(0, 0)
+                shape[1] = QPointF(10, 0)
+                shape[2] = QPointF(10, 10)
+                shape[3] = QPointF(0, 10)
+
 
         shiftPos = pos - point
         shape.moveVertexBy(index, shiftPos)
