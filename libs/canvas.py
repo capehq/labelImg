@@ -288,14 +288,15 @@ class Canvas(QWidget):
         pos = self.transformPos(ev.pos())
         self.selectShapePoint(pos)
         shape = self.selectedShape
-        if shape.prediction:  # accept prediction as label
-            shape.label = shape.label[7:]  # remove "P: dd% "prefix
-            shape.prediction = False
-            shape.score = 1.0
-            shape.line_color = generateColorByText(shape.label)
-            shape.fill_color = generateColorByText(shape.label)
-            self.selectShape(shape)  # re-select shape just to emit
-            self.update()
+        if shape is not None:
+            if shape.prediction:  # accept prediction as label
+                shape.label = shape.label[7:]  # remove "P: dd% "prefix
+                shape.prediction = False
+                shape.score = 1.0
+                shape.line_color = generateColorByText(shape.label)
+                shape.fill_color = generateColorByText(shape.label)
+                self.selectShape(shape)  # re-select shape just to emit
+                self.update()
 
     def selectShape(self, shape):
         self.deSelectShape()
