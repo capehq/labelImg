@@ -7,6 +7,7 @@ import platform
 import re
 import sys
 import subprocess
+import shutil
 
 from functools import partial
 from collections import defaultdict
@@ -1400,6 +1401,8 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.useGoogleDrive = True
         self.defaultSaveDir = './temp'
+        shutil.rmtree(self.defaultSaveDir)
+        os.makedirs(self.defaultSaveDir)
         self.importGoogleDriveImages()
 
     def importGoogleDriveImages(self):
