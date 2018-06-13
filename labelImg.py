@@ -822,14 +822,14 @@ class MainWindow(QMainWindow, WindowMixin):
         self.canvas.loadShapes(s)
 
     def significantOverlap(self, new_shape):
-        # Checking "Intersectover Union" with all existing shape,
+        # Checking "Intersect over Union" with all existing shape,
         # reject prediction if IoU over threshold found
         thresholdIoU = 0.7
         maxIoU = 0
         for item, shape in self.itemsToShapes.items():
-            if not shape.prediction:
-                IoU = self.calculateIoU(shape, new_shape)
-                if maxIoU < IoU: maxIoU = IoU
+            IoU = self.calculateIoU(shape, new_shape)
+            if maxIoU < IoU:
+                maxIoU = IoU
 
         return maxIoU > thresholdIoU
 
@@ -841,7 +841,7 @@ class MainWindow(QMainWindow, WindowMixin):
         xIntersect = min(xmaxA, xmaxB) - max(xminA, xminB)
         yIntersect = min(ymaxA, ymaxB) - max(yminA, yminB)
 
-        if xIntersect<0 or yIntersect<0:
+        if xIntersect < 0 or yIntersect < 0:
             return 0
         else:
             intersect = xIntersect * yIntersect
@@ -1401,7 +1401,7 @@ class MainWindow(QMainWindow, WindowMixin):
 
         self.useGoogleDrive = True
         self.defaultSaveDir = './temp'
-        shutil.rmtree(self.defaultSaveDir)
+        shutil.rmtree(self.defaultSaveDir, ignore_errors=True)
         os.makedirs(self.defaultSaveDir)
         self.importGoogleDriveImages()
 
