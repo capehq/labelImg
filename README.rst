@@ -55,7 +55,8 @@ To use Google Drive API, we need the `client_secrets.json` file for authenticati
     
     virtualenv -p python3 <virtualenv name>
     source <virtualenv name>/bin/activate
-    pip3 install PyQt5 lxml pydrive
+    pip3 install pyqt5==5.10.1 lxml pydrive
+    pip install --upgrade sip
     make qt5py3
     python3 labelImg.py
     
